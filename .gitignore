@@ -27,3 +27,6 @@ env/
 
 # macOS
 .DS_Store
+
+.claude/
+/temp_diag.py

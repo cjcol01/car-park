@@ -17,7 +17,7 @@ Fixes applied:
 import math
 from dataclasses import dataclass
 
-from models import CarParkConfig, VehicleType
+from models import CarParkConfig, VehicleType, PricingTier
 
 
 @dataclass
@@ -25,7 +25,10 @@ class SimulationResult:
     """Results of a simulation run, all figures in £."""
     # Revenue (gross — VAT-inclusive, as charged to customers)
     daily_parking_revenue_gross: float = 0.0
+    daily_indoor_revenue_gross: float = 0.0
+    daily_outdoor_revenue_gross: float = 0.0
     daily_overnight_revenue_gross: float = 0.0
+    daily_long_term_revenue_gross: float = 0.0
     daily_total_revenue_gross: float = 0.0
 
     # Revenue (net — after VAT and card fees removed)
@@ -44,6 +47,7 @@ class SimulationResult:
     daily_maintenance: float = 0.0
     daily_business_rates: float = 0.0
     daily_cleaning: float = 0.0
+    daily_other: float = 0.0
     daily_mortgage: float = 0.0
     daily_total_cost: float = 0.0
 
@@ -65,9 +69,15 @@ class SimulationResult:
 
     # Useful breakdowns
     effective_daytime_spaces: int = 0
+    occupied_spaces: float = 0.0       # actual number of spaces in use at peak
+    total_spaces: int = 0              # total spaces in car park
     vehicles_per_day: float = 0.0
     turnover_rate: float = 0.0  # how many cars cycle through per space per day
     avg_revenue_per_vehicle: float = 0.0
+    indoor_spaces: int = 0
+    outdoor_spaces: int = 0
+    long_term_spaces: int = 0
+    overnight_spaces: int = 0
 
     # ANPR
     anpr_monthly_total: float = 0.0
@@ -89,12 +99,28 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
     """Run the simulation with the given configuration."""
     r = SimulationResult()
 
-    # --- Effective spaces (overnight cars reduce daytime capacity) ---
+    # --- Space allocation ---
     overnight_cars = min(config.overnight.num_overnight_cars, config.total_spaces)
-    r.effective_daytime_spaces = max(0, config.total_spaces - overnight_cars)
+    long_term_spaces = min(
+        config.long_term.num_long_term_spaces,
+        config.total_spaces - overnight_cars,
+    )
+    reserved_spaces = overnight_cars + long_term_spaces
+    short_stay_spaces = max(0, config.total_spaces - reserved_spaces)
 
-    # --- Vehicle throughput ---
-    occupied_spaces = r.effective_daytime_spaces * (config.occupancy_rate / 100.0)
+    # Indoor/outdoor split of short-stay spaces
+    indoor_spaces = min(config.indoor_outdoor.num_indoor_spaces, short_stay_spaces)
+    outdoor_spaces = short_stay_spaces - indoor_spaces
+
+    r.effective_daytime_spaces = short_stay_spaces
+    r.total_spaces = config.total_spaces
+    r.indoor_spaces = indoor_spaces
+    r.outdoor_spaces = outdoor_spaces
+    r.long_term_spaces = long_term_spaces
+    r.overnight_spaces = overnight_cars
+
+    # --- Vehicle throughput (short-stay spaces only) ---
+    r.occupied_spaces = r.effective_daytime_spaces * (config.occupancy_rate / 100.0)
 
     # Effective stay includes dead time between vehicles
     dead_time_hours = config.dead_time_minutes / 60.0
@@ -104,26 +130,49 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
         r.turnover_rate = config.operating_hours / effective_stay
     else:
         r.turnover_rate = 0
-    r.vehicles_per_day = occupied_spaces * r.turnover_rate
+    r.vehicles_per_day = r.occupied_spaces * r.turnover_rate
 
     # --- Normalised vehicle mix ---
     vehicle_mix = config.get_normalised_vehicle_mix()
 
-    # --- Daily parking revenue (gross, VAT-inclusive) ---
-    total_parking_revenue = 0.0
+    # --- Daily parking revenue split by indoor / outdoor ---
+    # Outdoor spaces use the standard per-vehicle-type pricing.
+    # Indoor spaces use the indoor pricing tier (same for all vehicle types).
+    outdoor_fraction = outdoor_spaces / short_stay_spaces if short_stay_spaces > 0 else 1.0
+    indoor_fraction = indoor_spaces / short_stay_spaces if short_stay_spaces > 0 else 0.0
+
+    indoor_tier = PricingTier(
+        vehicle_type=None,
+        hourly_rate=config.indoor_outdoor.indoor_hourly_rate,
+        daily_rate=config.indoor_outdoor.indoor_daily_rate,
+    )
+    indoor_cost_per_vehicle = indoor_tier.cost_for_duration(config.avg_stay_hours)
+
+    outdoor_revenue = 0.0
+    indoor_revenue = 0.0
     for vtype, fraction in vehicle_mix.items():
         num_vehicles = r.vehicles_per_day * fraction
         tier = config.pricing[vtype]
-        cost_per_vehicle = tier.cost_for_duration(config.avg_stay_hours)
-        total_parking_revenue += num_vehicles * cost_per_vehicle
+        outdoor_cost = tier.cost_for_duration(config.avg_stay_hours)
+        outdoor_revenue += num_vehicles * outdoor_fraction * outdoor_cost
+        indoor_revenue += num_vehicles * indoor_fraction * indoor_cost_per_vehicle
 
-    r.daily_parking_revenue_gross = total_parking_revenue
+    r.daily_outdoor_revenue_gross = outdoor_revenue
+    r.daily_indoor_revenue_gross = indoor_revenue
+    r.daily_parking_revenue_gross = outdoor_revenue + indoor_revenue
 
     # --- Overnight revenue (gross) ---
     r.daily_overnight_revenue_gross = overnight_cars * config.overnight.overnight_flat_fee
 
+    # --- Long-term revenue (weekly fee spread to daily) ---
+    r.daily_long_term_revenue_gross = (
+        long_term_spaces * config.long_term.weekly_fee_per_vehicle / 7.0
+    )
+
     r.daily_total_revenue_gross = (
-        r.daily_parking_revenue_gross + r.daily_overnight_revenue_gross
+        r.daily_parking_revenue_gross
+        + r.daily_overnight_revenue_gross
+        + r.daily_long_term_revenue_gross
     )
 
     # --- VAT: prices are inclusive, so extract VAT at 20% ---
@@ -146,25 +195,23 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
     days_per_month = days_per_week * 4.33  # average weeks per month
     days_per_year = days_per_week * 52
 
-    # Staff costs (including employer NI and pension)
+    # Staff costs (including employer NI and pension) — always calculated
+    base_wage_daily = (
+        config.staff.num_staff
+        * config.staff.hourly_wage
+        * config.staff.hours_per_day
+    )
+    r.daily_staff_cost = base_wage_daily
+    r.daily_employer_ni = base_wage_daily * (config.staff.employer_ni_pct / 100.0)
+    r.daily_employer_pension = base_wage_daily * (config.staff.employer_pension_pct / 100.0)
+
+    # ANPR costs (adds on top of staff, does not replace them)
     if config.anpr.enabled:
-        r.daily_staff_cost = 0.0
-        r.daily_employer_ni = 0.0
-        r.daily_employer_pension = 0.0
-        # ANPR costs
         monthly_amortised = config.anpr.install_cost / (config.anpr.amortise_years * 12)
         r.anpr_install_amortised_monthly = monthly_amortised
         r.anpr_monthly_total = monthly_amortised + config.anpr.monthly_maintenance
         r.daily_anpr_cost = r.anpr_monthly_total / days_per_month
     else:
-        base_wage_daily = (
-            config.staff.num_staff
-            * config.staff.hourly_wage
-            * config.staff.hours_per_day
-        )
-        r.daily_staff_cost = base_wage_daily
-        r.daily_employer_ni = base_wage_daily * (config.staff.employer_ni_pct / 100.0)
-        r.daily_employer_pension = base_wage_daily * (config.staff.employer_pension_pct / 100.0)
         r.daily_anpr_cost = 0.0
         r.anpr_monthly_total = 0.0
         r.anpr_install_amortised_monthly = 0.0
@@ -181,6 +228,7 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
     r.daily_maintenance = config.monthly_maintenance / days_per_month
     r.daily_business_rates = config.monthly_business_rates / days_per_month
     r.daily_cleaning = config.monthly_cleaning / days_per_month
+    r.daily_other = config.monthly_other / days_per_month
 
     # Mortgage
     if config.mortgage.enabled:
@@ -204,6 +252,7 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
         + r.daily_maintenance
         + r.daily_business_rates
         + r.daily_cleaning
+        + r.daily_other
         + r.daily_mortgage
     )
 
@@ -229,24 +278,21 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
         r.avg_revenue_per_vehicle = 0.0
 
     # --- Break-even occupancy ---
-    # Only parking revenue scales with occupancy. Overnight revenue is fixed.
-    # So: break-even is where parking_revenue_net = total_cost - overnight_revenue_net
-    # parking_revenue_net scales linearly with occupancy.
-    overnight_net = r.daily_overnight_revenue_gross * (100.0 / 120.0) * (
-        (100.0 - config.card_processing_fee_pct) / 100.0
-    )
-    parking_net = r.daily_total_revenue_net - overnight_net
+    # Only short-stay parking revenue scales with occupancy.
+    # Overnight and long-term revenues are fixed regardless of occupancy.
+    vat_card_factor = (100.0 / 120.0) * ((100.0 - config.card_processing_fee_pct) / 100.0)
+    fixed_revenue_net = (
+        r.daily_overnight_revenue_gross + r.daily_long_term_revenue_gross
+    ) * vat_card_factor
+    parking_net = r.daily_total_revenue_net - fixed_revenue_net
 
     if parking_net > 0 and config.occupancy_rate > 0:
-        # How much cost needs to be covered by parking revenue
-        cost_minus_overnight = r.daily_total_cost - overnight_net
-        if cost_minus_overnight <= 0:
-            # Overnight revenue alone covers costs
+        cost_minus_fixed = r.daily_total_cost - fixed_revenue_net
+        if cost_minus_fixed <= 0:
             r.break_even_occupancy = 0.0
         else:
-            # parking_net is at current occupancy. Scale to find break-even.
             parking_net_per_pct = parking_net / config.occupancy_rate
-            r.break_even_occupancy = cost_minus_overnight / parking_net_per_pct
+            r.break_even_occupancy = cost_minus_fixed / parking_net_per_pct
     else:
         r.break_even_occupancy = 100.0
 
