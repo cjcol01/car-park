@@ -138,9 +138,14 @@ class CarParkSimulatorGUI:
         self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Mousewheel
-        def _on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # Mousewheel — delta units differ by platform
+        ws = self.root.tk.call("tk", "windowingsystem")
+        if ws == "aqua":  # macOS: delta is already small (1–5 per notch)
+            def _on_mousewheel(event):
+                self.canvas.yview_scroll(-1 * event.delta, "units")
+        else:  # Windows/X11: delta is ±120 per notch
+            def _on_mousewheel(event):
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
         self.canvas.bind_all("<Button-4>", lambda e: self.canvas.yview_scroll(-3, "units"))
         self.canvas.bind_all("<Button-5>", lambda e: self.canvas.yview_scroll(3, "units"))
@@ -255,7 +260,8 @@ class CarParkSimulatorGUI:
         # --- Occupancy & Duration ---
         sec, f, row = self._make_section(parent, "Occupancy & Duration", row, expanded=True)
         r = 0
-        self._make_slider(f, "Occupancy Rate", 0, 100, 50, 1, r, "occupancy_rate", "pct"); r += 1
+        _, _, _, self._occupancy_val_label = self._make_slider(
+            f, "Day Occupancy Rate", 0, 100, 50, 1, r, "occupancy_rate", "pct"); r += 1
         self._make_slider(f, "Avg Stay (hours)", 0.5, 11, 5, 0.5, r, "avg_stay_hours", "hrs"); r += 1
         self._make_slider(f, "Dead Time (mins)", 0, 30, 0, 1, r, "dead_time_minutes", "min"); r += 1
         self._make_slider(f, "Operating Days/Week", 1, 7, 7, 1, r, "days_per_week", "int"); r += 1
@@ -375,7 +381,7 @@ class CarParkSimulatorGUI:
         sections = [
             ("capacity", "Capacity & Throughput", True, "occupancy_display", [
                 ("space_summary",          "Space Summary"),
-                ("occupancy_display",      "Occupancy"),
+                ("occupancy_display",      "Day Occupancy"),
                 ("vehicles_per_day",       "Vehicles per Day"),
                 ("turnover_rate",          "Turnover per Space"),
                 ("avg_revenue_per_vehicle","Avg Revenue / Vehicle"),
@@ -580,6 +586,12 @@ class CarParkSimulatorGUI:
         # Run simulation
         result = run_simulation(cfg)
 
+        # Update occupancy slider value label with (occupied/available) bracket
+        occupied = int(round(result.occupied_spaces))
+        self._occupancy_val_label.config(
+            text=f"{cfg.occupancy_rate:.0f}% ({occupied}/{result.effective_daytime_spaces})"
+        )
+
         # --- Format helpers ---
         def fmt_money(v):  return f"£{v:,.2f}"
         def fmt_pct(v):    return f"{v:.1f}%"
@@ -608,11 +620,9 @@ class CarParkSimulatorGUI:
         cost_keys    = {"daily_vat_liability", "daily_card_fees", "daily_total_cost"}
         custom_keys  = {"occupancy_display", "space_summary"}
 
-        occupied = int(round(result.occupied_spaces))
         custom_values = {
             "occupancy_display": (
-                f"{cfg.occupancy_rate:.0f}%  "
-                f"({occupied}/{result.effective_daytime_spaces} cars)"
+                f"{cfg.occupancy_rate:.0f}% ({occupied}/{result.effective_daytime_spaces} spaces)"
             ),
             "space_summary": (
                 f"{result.outdoor_spaces} out / {result.indoor_spaces} in / "
