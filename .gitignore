@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.pyc
+
+# PyInstaller (exe build files)
+*.spec
+build/
+dist/*.app
+dist/*.pkg
+
+# But keep the exe
+!dist/*.exe
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store

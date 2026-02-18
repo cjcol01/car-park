@@ -1,0 +1,253 @@
+"""
+Simulation engine for the car park.
+Calculates daily, weekly, monthly and yearly financials.
+
+Fixes applied:
+- Overnight cars reduce available daytime spaces
+- Vehicle mix is normalised (always sums to 100%)
+- Break-even only considers occupancy-dependent revenue
+- Dead time between vehicles reduces effective turnover
+- Overnight cars capped at total spaces
+- VAT extracted from revenue (prices are VAT-inclusive)
+- Employer NI and pension added to staff costs
+- Card processing fees deducted
+- Business rates and cleaning costs included
+"""
+
+import math
+from dataclasses import dataclass
+
+from models import CarParkConfig, VehicleType
+
+
+@dataclass
+class SimulationResult:
+    """Results of a simulation run, all figures in £."""
+    # Revenue (gross — VAT-inclusive, as charged to customers)
+    daily_parking_revenue_gross: float = 0.0
+    daily_overnight_revenue_gross: float = 0.0
+    daily_total_revenue_gross: float = 0.0
+
+    # Revenue (net — after VAT and card fees removed)
+    daily_vat_liability: float = 0.0
+    daily_card_fees: float = 0.0
+    daily_total_revenue_net: float = 0.0
+
+    # Costs (daily)
+    daily_staff_cost: float = 0.0
+    daily_employer_ni: float = 0.0
+    daily_employer_pension: float = 0.0
+    daily_anpr_cost: float = 0.0
+    daily_rent: float = 0.0
+    daily_insurance: float = 0.0
+    daily_utilities: float = 0.0
+    daily_maintenance: float = 0.0
+    daily_business_rates: float = 0.0
+    daily_cleaning: float = 0.0
+    daily_mortgage: float = 0.0
+    daily_total_cost: float = 0.0
+
+    # Profit
+    daily_profit: float = 0.0
+
+    # Aggregates
+    weekly_revenue: float = 0.0
+    weekly_cost: float = 0.0
+    weekly_profit: float = 0.0
+
+    monthly_revenue: float = 0.0
+    monthly_cost: float = 0.0
+    monthly_profit: float = 0.0
+
+    yearly_revenue: float = 0.0
+    yearly_cost: float = 0.0
+    yearly_profit: float = 0.0
+
+    # Useful breakdowns
+    effective_daytime_spaces: int = 0
+    vehicles_per_day: float = 0.0
+    turnover_rate: float = 0.0  # how many cars cycle through per space per day
+    avg_revenue_per_vehicle: float = 0.0
+
+    # ANPR
+    anpr_monthly_total: float = 0.0
+    anpr_install_amortised_monthly: float = 0.0
+    staff_monthly_total: float = 0.0
+
+    # Mortgage
+    mortgage_monthly_payment: float = 0.0
+    mortgage_total_interest: float = 0.0
+    mortgage_total_repaid: float = 0.0
+    mortgage_loan_amount: float = 0.0
+    mortgage_deposit: float = 0.0
+
+    # Break-even
+    break_even_occupancy: float = 0.0  # % occupancy needed to break even
+
+
+def run_simulation(config: CarParkConfig) -> SimulationResult:
+    """Run the simulation with the given configuration."""
+    r = SimulationResult()
+
+    # --- Effective spaces (overnight cars reduce daytime capacity) ---
+    overnight_cars = min(config.overnight.num_overnight_cars, config.total_spaces)
+    r.effective_daytime_spaces = max(0, config.total_spaces - overnight_cars)
+
+    # --- Vehicle throughput ---
+    occupied_spaces = r.effective_daytime_spaces * (config.occupancy_rate / 100.0)
+
+    # Effective stay includes dead time between vehicles
+    dead_time_hours = config.dead_time_minutes / 60.0
+    effective_stay = config.avg_stay_hours + dead_time_hours
+
+    if effective_stay > 0:
+        r.turnover_rate = config.operating_hours / effective_stay
+    else:
+        r.turnover_rate = 0
+    r.vehicles_per_day = occupied_spaces * r.turnover_rate
+
+    # --- Normalised vehicle mix ---
+    vehicle_mix = config.get_normalised_vehicle_mix()
+
+    # --- Daily parking revenue (gross, VAT-inclusive) ---
+    total_parking_revenue = 0.0
+    for vtype, fraction in vehicle_mix.items():
+        num_vehicles = r.vehicles_per_day * fraction
+        tier = config.pricing[vtype]
+        cost_per_vehicle = tier.cost_for_duration(config.avg_stay_hours)
+        total_parking_revenue += num_vehicles * cost_per_vehicle
+
+    r.daily_parking_revenue_gross = total_parking_revenue
+
+    # --- Overnight revenue (gross) ---
+    r.daily_overnight_revenue_gross = overnight_cars * config.overnight.overnight_flat_fee
+
+    r.daily_total_revenue_gross = (
+        r.daily_parking_revenue_gross + r.daily_overnight_revenue_gross
+    )
+
+    # --- VAT: prices are inclusive, so extract VAT at 20% ---
+    # VAT-inclusive means: gross = net + VAT, where VAT = net × 20%
+    # So: gross = net × 1.20, therefore net = gross / 1.20
+    r.daily_vat_liability = r.daily_total_revenue_gross * (20.0 / 120.0)
+
+    # --- Card processing fees ---
+    r.daily_card_fees = (
+        r.daily_total_revenue_gross * (config.card_processing_fee_pct / 100.0)
+    )
+
+    # --- Net revenue (what you actually keep) ---
+    r.daily_total_revenue_net = (
+        r.daily_total_revenue_gross - r.daily_vat_liability - r.daily_card_fees
+    )
+
+    # --- Daily costs ---
+    days_per_week = config.opening_days_per_week
+    days_per_month = days_per_week * 4.33  # average weeks per month
+    days_per_year = days_per_week * 52
+
+    # Staff costs (including employer NI and pension)
+    if config.anpr.enabled:
+        r.daily_staff_cost = 0.0
+        r.daily_employer_ni = 0.0
+        r.daily_employer_pension = 0.0
+        # ANPR costs
+        monthly_amortised = config.anpr.install_cost / (config.anpr.amortise_years * 12)
+        r.anpr_install_amortised_monthly = monthly_amortised
+        r.anpr_monthly_total = monthly_amortised + config.anpr.monthly_maintenance
+        r.daily_anpr_cost = r.anpr_monthly_total / days_per_month
+    else:
+        base_wage_daily = (
+            config.staff.num_staff
+            * config.staff.hourly_wage
+            * config.staff.hours_per_day
+        )
+        r.daily_staff_cost = base_wage_daily
+        r.daily_employer_ni = base_wage_daily * (config.staff.employer_ni_pct / 100.0)
+        r.daily_employer_pension = base_wage_daily * (config.staff.employer_pension_pct / 100.0)
+        r.daily_anpr_cost = 0.0
+        r.anpr_monthly_total = 0.0
+        r.anpr_install_amortised_monthly = 0.0
+
+    r.staff_monthly_total = (
+        (r.daily_staff_cost + r.daily_employer_ni + r.daily_employer_pension)
+        * days_per_month
+    )
+
+    # Fixed monthly costs spread to daily
+    r.daily_rent = config.monthly_rent / days_per_month
+    r.daily_insurance = config.monthly_insurance / days_per_month
+    r.daily_utilities = config.monthly_utilities / days_per_month
+    r.daily_maintenance = config.monthly_maintenance / days_per_month
+    r.daily_business_rates = config.monthly_business_rates / days_per_month
+    r.daily_cleaning = config.monthly_cleaning / days_per_month
+
+    # Mortgage
+    if config.mortgage.enabled:
+        r.mortgage_monthly_payment = config.mortgage.monthly_payment
+        r.mortgage_total_interest = config.mortgage.total_interest
+        r.mortgage_total_repaid = config.mortgage.total_repaid
+        r.mortgage_loan_amount = config.mortgage.loan_amount
+        r.mortgage_deposit = config.mortgage.deposit_amount
+        r.daily_mortgage = config.mortgage.monthly_payment / days_per_month
+    else:
+        r.daily_mortgage = 0.0
+
+    r.daily_total_cost = (
+        r.daily_staff_cost
+        + r.daily_employer_ni
+        + r.daily_employer_pension
+        + r.daily_anpr_cost
+        + r.daily_rent
+        + r.daily_insurance
+        + r.daily_utilities
+        + r.daily_maintenance
+        + r.daily_business_rates
+        + r.daily_cleaning
+        + r.daily_mortgage
+    )
+
+    r.daily_profit = r.daily_total_revenue_net - r.daily_total_cost
+
+    # --- Aggregates (using net revenue) ---
+    r.weekly_revenue = r.daily_total_revenue_net * days_per_week
+    r.weekly_cost = r.daily_total_cost * days_per_week
+    r.weekly_profit = r.daily_profit * days_per_week
+
+    r.monthly_revenue = r.daily_total_revenue_net * days_per_month
+    r.monthly_cost = r.daily_total_cost * days_per_month
+    r.monthly_profit = r.daily_profit * days_per_month
+
+    r.yearly_revenue = r.daily_total_revenue_net * days_per_year
+    r.yearly_cost = r.daily_total_cost * days_per_year
+    r.yearly_profit = r.daily_profit * days_per_year
+
+    # --- Per-vehicle average ---
+    if r.vehicles_per_day > 0:
+        r.avg_revenue_per_vehicle = r.daily_parking_revenue_gross / r.vehicles_per_day
+    else:
+        r.avg_revenue_per_vehicle = 0.0
+
+    # --- Break-even occupancy ---
+    # Only parking revenue scales with occupancy. Overnight revenue is fixed.
+    # So: break-even is where parking_revenue_net = total_cost - overnight_revenue_net
+    # parking_revenue_net scales linearly with occupancy.
+    overnight_net = r.daily_overnight_revenue_gross * (100.0 / 120.0) * (
+        (100.0 - config.card_processing_fee_pct) / 100.0
+    )
+    parking_net = r.daily_total_revenue_net - overnight_net
+
+    if parking_net > 0 and config.occupancy_rate > 0:
+        # How much cost needs to be covered by parking revenue
+        cost_minus_overnight = r.daily_total_cost - overnight_net
+        if cost_minus_overnight <= 0:
+            # Overnight revenue alone covers costs
+            r.break_even_occupancy = 0.0
+        else:
+            # parking_net is at current occupancy. Scale to find break-even.
+            parking_net_per_pct = parking_net / config.occupancy_rate
+            r.break_even_occupancy = cost_minus_overnight / parking_net_per_pct
+    else:
+        r.break_even_occupancy = 100.0
+
+    return r
