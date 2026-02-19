@@ -262,7 +262,8 @@ class CarParkSimulatorGUI:
         r = 0
         _, _, _, self._occupancy_val_label = self._make_slider(
             f, "Day Occupancy Rate", 0, 100, 50, 1, r, "occupancy_rate", "pct"); r += 1
-        self._make_slider(f, "Avg Stay (hours)", 0.5, 11, 5, 0.5, r, "avg_stay_hours", "hrs"); r += 1
+        self._make_slider(f, "Commuter (vs short stay) %", 0, 100, 35, 1, r, "commuter_pct", "pct"); r += 1
+        self._make_slider(f, "Short-Stay Avg Stay (hrs)", 0.5, 11, 2, 0.5, r, "avg_stay_hours", "hrs"); r += 1
         self._make_slider(f, "Dead Time (mins)", 0, 30, 0, 1, r, "dead_time_minutes", "min"); r += 1
         self._make_slider(f, "Operating Days/Week", 1, 7, 7, 1, r, "days_per_week", "int"); r += 1
         ttk.Separator(f, orient="horizontal").grid(
@@ -306,7 +307,7 @@ class CarParkSimulatorGUI:
         ttk.Checkbutton(f, text="Enable Mortgage (disables Rent when on)",
                         variable=self.vars["mortgage_enabled"],
                         command=self._update_results).grid(row=r, column=0, columnspan=3, sticky="w"); r += 1
-        self._make_slider(f, "Purchase Price (£)", 50000, 4000000, 2000000, 10000, r, "purchase_price", "gbp"); r += 1
+        self._make_slider(f, "Purchase Price (£)", 50000, 4000000, 2500000, 10000, r, "purchase_price", "gbp"); r += 1
         self._make_slider(f, "Deposit %", 0, 100, 25, 1, r, "deposit_pct", "pct"); r += 1
         self._make_slider(f, "Interest Rate %", 0.5, 15, 6, 0.1, r, "interest_rate", "pct"); r += 1
         self._make_slider(f, "Term (years)", 1, 35, 25, 1, r, "mortgage_term", "yrs"); r += 1
@@ -380,15 +381,21 @@ class CarParkSimulatorGUI:
         # collapsible=False hides the expand arrow (non-interactive header).
         sections = [
             ("capacity", "Capacity & Throughput", True, "occupancy_display", [
-                ("space_summary",          "Space Summary"),
-                ("occupancy_display",      "Day Occupancy"),
-                ("vehicles_per_day",       "Vehicles per Day"),
-                ("turnover_rate",          "Turnover per Space"),
-                ("avg_revenue_per_vehicle","Avg Revenue / Vehicle"),
+                ("space_summary",               "Space Summary"),
+                ("occupancy_display",           "Day Occupancy"),
+                (None, None),
+                ("commuter_vehicles_per_day",   "Commuter Vehicles/Day"),
+                ("short_stay_vehicles_per_day", "Short-Stay Vehicles/Day"),
+                ("vehicles_per_day",            "Total Vehicles/Day"),
+                ("commuter_turnover_rate",      "Commuter Turnover"),
+                ("short_stay_turnover_rate",    "Short-Stay Turnover"),
+                ("avg_revenue_per_vehicle",     "Avg Revenue / Vehicle"),
             ], True),
             ("revenue", "Daily Revenue", True, "daily_total_revenue_gross", [
-                ("daily_outdoor_revenue_gross",  "Outdoor Parking"),
-                ("daily_indoor_revenue_gross",   "Indoor Parking"),
+                ("daily_commuter_revenue_gross", "Commuter Parking"),
+                ("daily_short_stay_revenue_gross","Short-Stay Parking"),
+                ("daily_outdoor_revenue_gross",  "  Outdoor"),
+                ("daily_indoor_revenue_gross",   "  Indoor"),
                 ("daily_parking_revenue_gross",  "Short-Stay Total"),
                 ("daily_overnight_revenue_gross","Overnight"),
                 ("daily_long_term_revenue_gross","Long-Term"),
@@ -496,6 +503,7 @@ class CarParkSimulatorGUI:
             occupancy_rate=self.vars["occupancy_rate"].get(),
             avg_stay_hours=self.vars["avg_stay_hours"].get(),
             dead_time_minutes=self.vars["dead_time_minutes"].get(),
+            commuter_pct=self.vars["commuter_pct"].get(),
             pct_small_car=self.vars["pct_small_car"].get(),
             pct_large_car=self.vars["pct_large_car"].get(),
             pct_small_van=self.vars["pct_small_van"].get(),
@@ -599,6 +607,7 @@ class CarParkSimulatorGUI:
 
         money_keys = {
             "daily_parking_revenue_gross",
+            "daily_commuter_revenue_gross", "daily_short_stay_revenue_gross",
             "daily_outdoor_revenue_gross", "daily_indoor_revenue_gross",
             "daily_overnight_revenue_gross", "daily_long_term_revenue_gross",
             "daily_total_revenue_gross", "daily_vat_liability", "daily_card_fees",
@@ -644,7 +653,9 @@ class CarParkSimulatorGUI:
                 return fmt_money(val), val
             if key == "break_even_occupancy":
                 return fmt_pct(val), val
-            if key in {"vehicles_per_day", "turnover_rate"}:
+            if key in {"vehicles_per_day", "turnover_rate",
+                       "commuter_vehicles_per_day", "short_stay_vehicles_per_day",
+                       "commuter_turnover_rate", "short_stay_turnover_rate"}:
                 return fmt_float(val), val
             return str(val), val
 

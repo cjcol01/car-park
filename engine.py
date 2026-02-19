@@ -72,12 +72,22 @@ class SimulationResult:
     occupied_spaces: float = 0.0       # actual number of spaces in use at peak
     total_spaces: int = 0              # total spaces in car park
     vehicles_per_day: float = 0.0
-    turnover_rate: float = 0.0  # how many cars cycle through per space per day
+    turnover_rate: float = 0.0  # blended turnover for display
     avg_revenue_per_vehicle: float = 0.0
     indoor_spaces: int = 0
     outdoor_spaces: int = 0
     long_term_spaces: int = 0
     overnight_spaces: int = 0
+
+    # Commuter vs short-stay split
+    commuter_spaces_count: float = 0.0
+    short_stay_spaces_count: float = 0.0
+    commuter_vehicles_per_day: float = 0.0
+    short_stay_vehicles_per_day: float = 0.0
+    commuter_turnover_rate: float = 0.0
+    short_stay_turnover_rate: float = 0.0
+    daily_commuter_revenue_gross: float = 0.0
+    daily_short_stay_revenue_gross: float = 0.0
 
     # ANPR
     anpr_monthly_total: float = 0.0
@@ -119,25 +129,19 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
     r.long_term_spaces = long_term_spaces
     r.overnight_spaces = overnight_cars
 
-    # --- Vehicle throughput (short-stay spaces only) ---
-    r.occupied_spaces = r.effective_daytime_spaces * (config.occupancy_rate / 100.0)
+    # --- Commuter vs short-stay space split ---
+    commuter_fraction = config.commuter_pct / 100.0
+    ss_fraction = 1.0 - commuter_fraction
+    commuter_spaces = short_stay_spaces * commuter_fraction
+    ss_spaces = short_stay_spaces * ss_fraction
 
-    # Effective stay includes dead time between vehicles
-    dead_time_hours = config.dead_time_minutes / 60.0
-    effective_stay = config.avg_stay_hours + dead_time_hours
-
-    if effective_stay > 0:
-        r.turnover_rate = config.operating_hours / effective_stay
-    else:
-        r.turnover_rate = 0
-    r.vehicles_per_day = r.occupied_spaces * r.turnover_rate
+    r.commuter_spaces_count = commuter_spaces
+    r.short_stay_spaces_count = ss_spaces
 
     # --- Normalised vehicle mix ---
     vehicle_mix = config.get_normalised_vehicle_mix()
 
-    # --- Daily parking revenue split by indoor / outdoor ---
-    # Outdoor spaces use the standard per-vehicle-type pricing.
-    # Indoor spaces use the indoor pricing tier (same for all vehicle types).
+    # --- Indoor / outdoor fractions (applied equally to both populations) ---
     outdoor_fraction = outdoor_spaces / short_stay_spaces if short_stay_spaces > 0 else 1.0
     indoor_fraction = indoor_spaces / short_stay_spaces if short_stay_spaces > 0 else 0.0
 
@@ -146,20 +150,62 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
         hourly_rate=config.indoor_outdoor.indoor_hourly_rate,
         daily_rate=config.indoor_outdoor.indoor_daily_rate,
     )
-    indoor_cost_per_vehicle = indoor_tier.cost_for_duration(config.avg_stay_hours)
 
-    outdoor_revenue = 0.0
-    indoor_revenue = 0.0
-    for vtype, fraction in vehicle_mix.items():
-        num_vehicles = r.vehicles_per_day * fraction
+    # --- Commuter population ---
+    # Commuters stay all day (>= daily threshold), turnover = 1 per space per day.
+    # Occupancy rate applies the same as short-stay.
+    commuter_occupied = commuter_spaces * (config.occupancy_rate / 100.0)
+    r.commuter_turnover_rate = 1.0
+    r.commuter_vehicles_per_day = commuter_occupied  # one car per space per day
+
+    # Cost per commuter: always hits daily rate (stay = operating_hours >= threshold)
+    indoor_cost_commuter = indoor_tier.cost_for_duration(config.operating_hours)
+    commuter_outdoor_rev = 0.0
+    commuter_indoor_rev = 0.0
+    for vtype, mix_frac in vehicle_mix.items():
+        num_vehicles = r.commuter_vehicles_per_day * mix_frac
+        tier = config.pricing[vtype]
+        outdoor_cost = tier.cost_for_duration(config.operating_hours)
+        commuter_outdoor_rev += num_vehicles * outdoor_fraction * outdoor_cost
+        commuter_indoor_rev += num_vehicles * indoor_fraction * indoor_cost_commuter
+
+    # --- Short-stay population ---
+    # Use existing turnover model based on avg_stay_hours + dead_time.
+    dead_time_hours = config.dead_time_minutes / 60.0
+    effective_stay = config.avg_stay_hours + dead_time_hours
+    if effective_stay > 0:
+        ss_turnover = config.operating_hours / effective_stay
+    else:
+        ss_turnover = 0.0
+    r.short_stay_turnover_rate = ss_turnover
+
+    ss_occupied = ss_spaces * (config.occupancy_rate / 100.0)
+    r.short_stay_vehicles_per_day = ss_occupied * ss_turnover
+
+    indoor_cost_ss = indoor_tier.cost_for_duration(config.avg_stay_hours)
+    ss_outdoor_rev = 0.0
+    ss_indoor_rev = 0.0
+    for vtype, mix_frac in vehicle_mix.items():
+        num_vehicles = r.short_stay_vehicles_per_day * mix_frac
         tier = config.pricing[vtype]
         outdoor_cost = tier.cost_for_duration(config.avg_stay_hours)
-        outdoor_revenue += num_vehicles * outdoor_fraction * outdoor_cost
-        indoor_revenue += num_vehicles * indoor_fraction * indoor_cost_per_vehicle
+        ss_outdoor_rev += num_vehicles * outdoor_fraction * outdoor_cost
+        ss_indoor_rev += num_vehicles * indoor_fraction * indoor_cost_ss
 
-    r.daily_outdoor_revenue_gross = outdoor_revenue
-    r.daily_indoor_revenue_gross = indoor_revenue
-    r.daily_parking_revenue_gross = outdoor_revenue + indoor_revenue
+    # --- Aggregate throughput ---
+    r.occupied_spaces = commuter_occupied + ss_occupied
+    r.vehicles_per_day = r.commuter_vehicles_per_day + r.short_stay_vehicles_per_day
+    # Blended turnover = vehicles / occupied spaces (meaningful for display)
+    r.turnover_rate = (
+        r.vehicles_per_day / r.occupied_spaces if r.occupied_spaces > 0 else 0.0
+    )
+
+    # --- Aggregate revenue ---
+    r.daily_commuter_revenue_gross = commuter_outdoor_rev + commuter_indoor_rev
+    r.daily_short_stay_revenue_gross = ss_outdoor_rev + ss_indoor_rev
+    r.daily_outdoor_revenue_gross = commuter_outdoor_rev + ss_outdoor_rev
+    r.daily_indoor_revenue_gross = commuter_indoor_rev + ss_indoor_rev
+    r.daily_parking_revenue_gross = r.daily_outdoor_revenue_gross + r.daily_indoor_revenue_gross
 
     # --- Overnight revenue (gross) ---
     r.daily_overnight_revenue_gross = overnight_cars * config.overnight.overnight_flat_fee

@@ -157,6 +157,10 @@ class CarParkConfig:
     # between one car leaving and the next arriving (realistic: 10-20 min)
     dead_time_minutes: float = 10.0
 
+    # Commuter vs short-stay split (0 = all short-stay/retail, 100 = all commuters)
+    # Commuters stay all day (hit daily rate, turnover=1); short-stay use avg_stay_hours
+    commuter_pct: float = 0.0
+
     # Vehicle mix percentages (will be normalised to sum to 100)
     pct_small_car: float = 60.0
     pct_large_car: float = 20.0
