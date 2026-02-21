@@ -202,7 +202,7 @@ class CarParkSimulatorGUI:
         return section, section.content_frame, row
 
     def _make_slider(self, parent, label, from_, to_, default, resolution=1,
-                     row=0, var_key=None, fmt=None):
+                     row=0, var_key=None, fmt=None, val_width=10):
         """Create a labeled slider that updates on change.
         Returns (var, name_label, slider, val_label) for external state control."""
         name_lbl = ttk.Label(parent, text=label)
@@ -212,7 +212,7 @@ class CarParkSimulatorGUI:
         if var_key:
             self.vars[var_key] = var
 
-        val_label = ttk.Label(parent, text=self._format_val(default, fmt), width=10)
+        val_label = ttk.Label(parent, text=self._format_val(default, fmt), width=val_width)
         val_label.grid(row=row, column=2, sticky="e", padx=(5, 0))
 
         def on_change(val):
@@ -254,17 +254,18 @@ class CarParkSimulatorGUI:
         # --- Car Park Setup ---
         sec, f, row = self._make_section(parent, "Car Park Setup", row, expanded=True, sep=False)
         r = 0
-        self._make_slider(f, "Total Spaces", 1, 500, 80, 1, r, "total_spaces", "int"); r += 1
-        self._make_slider(f, "Indoor Spaces", 0, 500, 20, 1, r, "indoor_spaces", "int"); r += 1
+        self._make_slider(f, "Total Spaces", 1, 100, 80, 1, r, "total_spaces", "int"); r += 1
+        self._make_slider(f, "Indoor Spaces", 0, 100, 20, 1, r, "indoor_spaces", "int"); r += 1
 
         # --- Occupancy & Duration ---
         sec, f, row = self._make_section(parent, "Occupancy & Duration", row, expanded=True)
         r = 0
         _, _, _, self._occupancy_val_label = self._make_slider(
-            f, "Day Occupancy Rate", 0, 100, 50, 1, r, "occupancy_rate", "pct"); r += 1
-        self._make_slider(f, "Commuter (vs short stay) %", 0, 100, 35, 1, r, "commuter_pct", "pct"); r += 1
-        self._make_slider(f, "Short-Stay Avg Stay (hrs)", 0.5, 11, 2, 0.5, r, "avg_stay_hours", "hrs"); r += 1
-        self._make_slider(f, "Dead Time (mins)", 0, 30, 0, 1, r, "dead_time_minutes", "min"); r += 1
+            f, "Day Occupancy Rate", 0, 100, 50, 1, r, "occupancy_rate", "pct", val_width=16); r += 1
+        _, _, _, self._commuter_val_label = self._make_slider(
+            f, "Commuter (vs short stay) %", 0, 100, 35, 1, r, "commuter_pct", "pct", val_width=16); r += 1
+        self._make_slider(f, "Short-Stay Avg Stay (hrs)", 0.5, 11, 1.9, 0.1, r, "avg_stay_hours", "hrs"); r += 1
+        self._make_slider(f, "Dead Time (mins)", 0, 30, 10, 1, r, "dead_time_minutes", "min"); r += 1
         self._make_slider(f, "Operating Days/Week", 1, 7, 7, 1, r, "days_per_week", "int"); r += 1
         ttk.Separator(f, orient="horizontal").grid(
             row=r, column=0, columnspan=3, sticky="ew", pady=4); r += 1
@@ -309,7 +310,7 @@ class CarParkSimulatorGUI:
                         command=self._update_results).grid(row=r, column=0, columnspan=3, sticky="w"); r += 1
         self._make_slider(f, "Purchase Price (£)", 50000, 4000000, 2500000, 10000, r, "purchase_price", "gbp"); r += 1
         self._make_slider(f, "Deposit %", 0, 100, 25, 1, r, "deposit_pct", "pct"); r += 1
-        self._make_slider(f, "Interest Rate %", 0.5, 15, 6, 0.1, r, "interest_rate", "pct"); r += 1
+        self._make_slider(f, "Interest Rate %", 0.5, 15, 7, 0.1, r, "interest_rate", "pct"); r += 1
         self._make_slider(f, "Term (years)", 1, 35, 25, 1, r, "mortgage_term", "yrs"); r += 1
 
         # Mortgage summary labels (updated dynamically)
@@ -392,15 +393,14 @@ class CarParkSimulatorGUI:
                 ("avg_revenue_per_vehicle",     "Avg Revenue / Vehicle"),
             ], True),
             ("revenue", "Daily Revenue", True, "daily_total_revenue_gross", [
-                ("daily_commuter_revenue_gross", "Commuter Parking"),
+                ("daily_commuter_revenue_gross",  "Commuter Parking"),
                 ("daily_short_stay_revenue_gross","Short-Stay Parking"),
-                ("daily_outdoor_revenue_gross",  "  Outdoor"),
-                ("daily_indoor_revenue_gross",   "  Indoor"),
-                ("daily_parking_revenue_gross",  "Short-Stay Total"),
-                ("daily_overnight_revenue_gross","Overnight"),
-                ("daily_long_term_revenue_gross","Long-Term"),
+                ("daily_parking_revenue_gross",   "Parking Total"),
                 (None, None),
-                ("daily_total_revenue_gross",    "Total Gross Revenue"),
+                ("daily_overnight_revenue_gross", "Overnight"),
+                ("daily_long_term_revenue_gross", "Long-Term"),
+                (None, None),
+                ("daily_total_revenue_gross",     "Total Gross Revenue"),
             ], True),
             ("costs", "Daily Costs", False, "daily_total_cost", [
                 ("daily_vat_liability",    "VAT (20%)"),
@@ -594,10 +594,19 @@ class CarParkSimulatorGUI:
         # Run simulation
         result = run_simulation(cfg)
 
-        # Update occupancy slider value label with (occupied/available) bracket
-        occupied = int(round(result.occupied_spaces))
+        # Total occupied = occupancy% of all short-stay spaces
+        # Commuter % splits those occupied spaces, not the total spaces
+        total_ss_spaces = result.effective_daytime_spaces
+        total_occupied = int(round(result.occupied_spaces))
+        comm_occupied = int(round(result.commuter_vehicles_per_day))
+        ss_occupied = int(round(result.short_stay_vehicles_per_day / result.short_stay_turnover_rate
+                                if result.short_stay_turnover_rate > 0 else 0))
+
         self._occupancy_val_label.config(
-            text=f"{cfg.occupancy_rate:.0f}% ({occupied}/{result.effective_daytime_spaces})"
+            text=f"{cfg.occupancy_rate:.0f}% ({total_occupied}/{total_ss_spaces})"
+        )
+        self._commuter_val_label.config(
+            text=f"{cfg.commuter_pct:.0f}% ({comm_occupied}c / {ss_occupied}ss)"
         )
 
         # --- Format helpers ---
@@ -631,7 +640,7 @@ class CarParkSimulatorGUI:
 
         custom_values = {
             "occupancy_display": (
-                f"{cfg.occupancy_rate:.0f}% ({occupied}/{result.effective_daytime_spaces} spaces)"
+                f"{cfg.occupancy_rate:.0f}% ({total_occupied}/{total_ss_spaces} spaces)"
             ),
             "space_summary": (
                 f"{result.outdoor_spaces} out / {result.indoor_spaces} in / "

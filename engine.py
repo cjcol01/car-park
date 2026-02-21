@@ -152,9 +152,13 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
     )
 
     # --- Commuter population ---
-    # Commuters stay all day (>= daily threshold), turnover = 1 per space per day.
-    # Occupancy rate applies the same as short-stay.
-    commuter_occupied = commuter_spaces * (config.occupancy_rate / 100.0)
+    # Occupancy rate applies to ALL short-stay spaces combined.
+    # Commuter % then splits those occupied spaces between commuters and short-stay.
+    # e.g. 50% occ over 55 spaces = 27.5 occupied; 35% commuter = 9.6 commuter, 17.9 ss
+    total_occupied = short_stay_spaces * (config.occupancy_rate / 100.0)
+    commuter_occupied = total_occupied * commuter_fraction
+    ss_occupied = total_occupied * ss_fraction
+
     r.commuter_turnover_rate = 1.0
     r.commuter_vehicles_per_day = commuter_occupied  # one car per space per day
 
@@ -170,8 +174,17 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
         commuter_indoor_rev += num_vehicles * indoor_fraction * indoor_cost_commuter
 
     # --- Short-stay population ---
-    # Use existing turnover model based on avg_stay_hours + dead_time.
-    dead_time_hours = config.dead_time_minutes / 60.0
+    # Dead time only meaningfully constrains throughput when the car park is
+    # nearly full — below the threshold occupancy there are always free spaces,
+    # so arriving cars don't experience delays from outgoing cars.
+    # Scale: 0 effect below DEAD_TIME_THRESHOLD, full effect at 100% occupancy.
+    DEAD_TIME_THRESHOLD = 80.0  # % occupancy below which dead time has no effect
+    occ = config.occupancy_rate
+    if occ <= DEAD_TIME_THRESHOLD:
+        dead_time_scale = 0.0
+    else:
+        dead_time_scale = (occ - DEAD_TIME_THRESHOLD) / (100.0 - DEAD_TIME_THRESHOLD)
+    dead_time_hours = (config.dead_time_minutes / 60.0) * dead_time_scale
     effective_stay = config.avg_stay_hours + dead_time_hours
     if effective_stay > 0:
         ss_turnover = config.operating_hours / effective_stay
@@ -179,7 +192,6 @@ def run_simulation(config: CarParkConfig) -> SimulationResult:
         ss_turnover = 0.0
     r.short_stay_turnover_rate = ss_turnover
 
-    ss_occupied = ss_spaces * (config.occupancy_rate / 100.0)
     r.short_stay_vehicles_per_day = ss_occupied * ss_turnover
 
     indoor_cost_ss = indoor_tier.cost_for_duration(config.avg_stay_hours)

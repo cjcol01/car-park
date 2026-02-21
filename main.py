@@ -20,7 +20,7 @@ def main():
     ws = root.tk.call("tk", "windowingsystem")
     if ws == "win32":
         root.state("zoomed")
-    elif ws == "x11":
+    elif ws == "x11":   
         root.attributes("-zoomed", True)
     else:  # aqua (macOS) — no -zoomed; use screen size
         root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
