@@ -1,13 +1,3 @@
-"""
-Car Park Simulator - Main entry point.
-
-A simulation tool for evaluating the financial viability of a 64-space car park.
-Pricing based on actual posted rates. Supports ANPR system modelling.
-
-Usage:
-    python main.py
-"""
-
 import tkinter as tk
 from gui import CarParkSimulatorGUI
 
@@ -16,7 +6,7 @@ def main():
     root = tk.Tk()
     root.geometry("1100x800")
     root.minsize(900, 600)
-    # Start maximised (platform-aware)
+    # start maximised, platform-aware
     ws = root.tk.call("tk", "windowingsystem")
     if ws == "win32":
         root.state("zoomed")

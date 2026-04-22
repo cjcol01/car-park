@@ -1,8 +1,3 @@
-"""
-Results panel for the car park simulator.
-Builds the right-side results display and handles all update logic.
-"""
-
 import tkinter as tk
 from tkinter import ttk
 
@@ -14,10 +9,8 @@ from engine import run_simulation
 from gui_widgets import CollapsibleSection, format_val
 
 
-# ---------------------------------------------------------------------------
-# Section definitions — (section_key, title, expanded, summary_key, items, collapsible)
-# items are (result_key, label_text); result_key=None inserts a separator row.
-# ---------------------------------------------------------------------------
+# (sec_key, title, expanded, summary_key, items, collapsible)
+# items: (result_key, label_text); None key = separator row
 RESULT_SECTIONS = [
     ("capacity", "Capacity & Throughput", True, "occupancy_display", [
         ("space_summary",               "Space Summary"),
@@ -120,12 +113,6 @@ KEY_ALIASES = {"mortgage_monthly_payment_hdr": "mortgage_monthly_payment"}
 
 
 def build_results(parent, on_toggle):
-    """Build the results panel into `parent`.
-
-    Returns:
-        result_labels   — dict of key -> ttk.Label for value display
-        result_sections — dict of key -> (CollapsibleSection, summary_key)
-    """
     ttk.Label(parent, text="Simulation Results",
               style="Header.TLabel").grid(row=0, column=0, columnspan=2, pady=(0, 10))
 
@@ -171,7 +158,6 @@ def update_results(vars_dict, result_labels, result_sections,
                    occupancy_val_label, commuter_val_label,
                    rent_name_lbl, rent_slider, rent_val_lbl,
                    mix_info, mortgage_summary_labels):
-    """Read all tkinter variables, run the simulation, and refresh all result labels."""
 
     total_spaces = int(vars_dict["total_spaces"].get())
     mortgage_on = vars_dict["mortgage_enabled"].get()
@@ -230,7 +216,7 @@ def update_results(vars_dict, result_labels, result_sections,
         card_processing_fee_pct=vars_dict["card_processing_fee_pct"].get(),
     )
 
-    # Pricing from sliders
+    # pricing from sliders
     for vtype in VehicleType:
         key_h = f"price_hourly_{vtype.name}"
         key_d = f"price_daily_{vtype.name}"
@@ -240,7 +226,7 @@ def update_results(vars_dict, result_labels, result_sections,
             daily_rate=vars_dict[key_d].get(),
         )
 
-    # Vehicle mix info label
+    # vehicle mix info label
     raw_total = (cfg.pct_small_car + cfg.pct_large_car +
                  cfg.pct_small_van + cfg.pct_large_van)
     if raw_total > 0:
@@ -252,7 +238,7 @@ def update_results(vars_dict, result_labels, result_sections,
         mix_info.config(text="⚠ All zero — defaulting to 100% small cars",
                         foreground="#f38ba8")
 
-    # Mortgage summary in controls panel
+    # mortgage summary in controls panel
     mort = cfg.mortgage
     mortgage_summary_labels["deposit_amount"].config(text=f"£{mort.deposit_amount:,.0f}")
     mortgage_summary_labels["loan_amount"].config(text=f"£{mort.loan_amount:,.0f}")
@@ -260,7 +246,7 @@ def update_results(vars_dict, result_labels, result_sections,
     mortgage_summary_labels["total_interest"].config(text=f"£{mort.total_interest:,.0f}")
     mortgage_summary_labels["total_repaid"].config(text=f"£{mort.total_repaid:,.0f}")
 
-    # Rent greyed-out state
+    # grey out rent when mortgage is on
     grey   = "#6c7086"
     normal = "#cdd6f4"
     if mortgage_on:
@@ -275,10 +261,8 @@ def update_results(vars_dict, result_labels, result_sections,
         )
         rent_slider.state(["!disabled"])
 
-    # Run simulation
     result = run_simulation(cfg)
 
-    # Dynamic occupancy label text
     total_ss_spaces = result.effective_daytime_spaces
     total_occupied  = int(round(result.occupied_spaces))
     comm_occupied   = int(round(result.commuter_vehicles_per_day))
@@ -294,7 +278,6 @@ def update_results(vars_dict, result_labels, result_sections,
         text=f"{cfg.commuter_pct:.0f}% ({comm_occupied}c / {ss_occupied}ss)"
     )
 
-    # --- Format helpers ---
     fmt_money = lambda v: f"£{v:,.2f}"
     fmt_pct   = lambda v: f"{v:.1f}%"
     fmt_float = lambda v: f"{v:.1f}"
@@ -324,7 +307,6 @@ def update_results(vars_dict, result_labels, result_sections,
             return fmt_float(val), val
         return str(val), val
 
-    # Update all result label rows
     for key, lbl in result_labels.items():
         text, val = format_value(key)
         if key in PROFIT_KEYS:
@@ -338,7 +320,6 @@ def update_results(vars_dict, result_labels, result_sections,
             lbl.configure(style="Neutral.TLabel", font=("Helvetica", 10, ""))
         lbl.config(text=text)
 
-    # Update section header summaries
     p = result.daily_profit
     section_summaries = {
         "capacity":         (custom_values["occupancy_display"], "Neutral.TLabel"),

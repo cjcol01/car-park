@@ -1,8 +1,3 @@
-"""
-GUI orchestrator for the car park simulator.
-Wires together the controls panel, results panel, and scroll canvas.
-"""
-
 import tkinter as tk
 from tkinter import ttk
 
@@ -22,7 +17,6 @@ class CarParkSimulatorGUI:
         self._build_ui()
         self._update_results()
 
-    # ------------------------------------------------------------------ UI
     def _build_ui(self):
         style = ttk.Style()
         style.theme_use("clam")
@@ -44,7 +38,7 @@ class CarParkSimulatorGUI:
         style.configure("TScale",      background="#1e1e2e")
         style.configure("TSeparator",  background="#45475a")
 
-        # Scrollable canvas
+        # scrollable canvas
         self.canvas = tk.Canvas(self.root, bg="#1e1e2e", highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
         self.main_frame = ttk.Frame(self.canvas)
@@ -59,7 +53,7 @@ class CarParkSimulatorGUI:
         self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Mousewheel — delta units differ by platform
+        # mousewheel — delta units differ by platform
         ws = self.root.tk.call("tk", "windowingsystem")
         if ws == "aqua":
             def _on_mousewheel(event):
@@ -71,13 +65,12 @@ class CarParkSimulatorGUI:
         self.canvas.bind_all("<Button-4>", lambda e: self.canvas.yview_scroll(-3, "units"))
         self.canvas.bind_all("<Button-5>", lambda e: self.canvas.yview_scroll(3, "units"))
 
-        # Two-column layout
+        # two-column layout
         left  = ttk.Frame(self.main_frame)
         left.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         right = ttk.Frame(self.main_frame)
         right.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        # Build controls — populates self.vars and self.sections, returns widget refs
         ctrl_refs = build_controls(
             left, self.vars, self._update_results, self.sections
         )
@@ -89,7 +82,6 @@ class CarParkSimulatorGUI:
         self._mix_info               = ctrl_refs["mix_info"]
         self._mortgage_summary_labels = ctrl_refs["mortgage_summary_labels"]
 
-        # Build results panel
         self._result_labels, self._result_sections = build_results(
             right, self._refresh_scroll
         )

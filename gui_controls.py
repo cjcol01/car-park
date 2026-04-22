@@ -1,8 +1,3 @@
-"""
-Controls panel for the car park simulator.
-Builds all left-side sliders, checkboxes, and sections.
-"""
-
 import tkinter as tk
 from tkinter import ttk
 
@@ -11,24 +6,6 @@ from gui_widgets import CollapsibleSection, make_slider, format_val
 
 
 def build_controls(parent, vars_dict, on_change, sections_list):
-    """Build the full controls panel into `parent`.
-
-    Args:
-        parent:       ttk.Frame to build into.
-        vars_dict:    Shared dict of tk variables (populated in-place).
-        on_change:    Callback to fire whenever any control changes.
-        sections_list: List to append CollapsibleSection objects to
-                       (for scroll-region refresh tracking).
-
-    Returns a namespace of widget references needed externally:
-        occupancy_val_label, commuter_val_label,
-        rent_name_lbl, rent_slider, rent_val_lbl,
-        mix_info, mortgage_summary_labels
-    """
-
-    def refresh_scroll():
-        # Resolved by the orchestrator via on_toggle; sections_list is used there
-        pass
 
     def make_section(title, row, expanded=True, sep=True):
         if sep:
@@ -47,9 +24,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
         return make_slider(f, label, from_, to_, default, res, row, key, fmt, vw,
                            vars_dict=vars_dict, on_change_callback=on_change)
 
-    # on_toggle needs to call both refresh_scroll AND on_change for scroll update
-    # We store a reference so make_section can use it
-    on_change_scroll = on_change  # on_change already triggers _refresh_scroll via the orchestrator
+    on_change_scroll = on_change
 
     refs = {}
     row = 0
@@ -58,13 +33,13 @@ def build_controls(parent, vars_dict, on_change, sections_list):
               style="Header.TLabel").grid(row=row, column=0, columnspan=3, pady=(0, 10))
     row += 1
 
-    # --- Car Park Setup ---
+    # car park setup
     sec, f, row = make_section("Car Park Setup", row, expanded=True, sep=False)
     r = 0
     ms(f, "Total Spaces", 1, 100, 80, 1, r, "total_spaces", "int"); r += 1
     ms(f, "Indoor Spaces", 0, 100, 20, 1, r, "indoor_spaces", "int"); r += 1
 
-    # --- Occupancy & Duration ---
+    # occupancy & duration
     sec, f, row = make_section("Occupancy & Duration", row, expanded=True)
     r = 0
     _, _, _, refs["occupancy_val_label"] = ms(
@@ -79,7 +54,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
     ms(f, "Overnight Cars", 0, 30, 5, 1, r, "overnight_cars", "int"); r += 1
     ms(f, "Long-Term Spaces (Wates)", 0, 50, 20, 1, r, "long_term_spaces", "int"); r += 1
 
-    # --- Vehicle Mix ---
+    # vehicle mix
     sec, f, row = make_section("Vehicle Mix (auto-normalised)", row, expanded=False)
     r = 0
     ms(f, "Small Cars %", 0, 100, 85, 1, r, "pct_small_car", "pct"); r += 1
@@ -90,7 +65,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
     mix_info.grid(row=r, column=0, columnspan=3, sticky="w"); r += 1
     refs["mix_info"] = mix_info
 
-    # --- Staffing ---
+    # staffing
     sec, f, row = make_section("Staffing", row, expanded=True)
     r = 0
     ms(f, "Number of Staff", 0, 5, 1, 1, r, "num_staff", "int"); r += 1
@@ -98,7 +73,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
     ms(f, "Employer NI %", 0, 20, 13.8, 0.1, r, "employer_ni_pct", "pct"); r += 1
     ms(f, "Employer Pension %", 0, 10, 3, 0.5, r, "employer_pension_pct", "pct"); r += 1
 
-    # --- ANPR ---
+    # anpr
     sec, f, row = make_section("ANPR System", row, expanded=False)
     r = 0
     vars_dict["anpr_enabled"] = tk.BooleanVar(value=False)
@@ -109,7 +84,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
     ms(f, "Monthly Maintenance (£)", 50, 1000, 200, 10, r, "anpr_monthly", "gbp"); r += 1
     ms(f, "Amortise Over (years)", 1, 10, 5, 1, r, "anpr_years", "yrs"); r += 1
 
-    # --- Mortgage ---
+    # mortgage
     sec, f, row = make_section("Mortgage / Purchase Finance", row, expanded=False)
     r = 0
     vars_dict["mortgage_enabled"] = tk.BooleanVar(value=True)
@@ -136,7 +111,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
         r += 1
     refs["mortgage_summary_labels"] = mortgage_summary_labels
 
-    # --- Fixed Costs ---
+    # fixed costs
     sec, f, row = make_section("Monthly Fixed Costs", row, expanded=True)
     r = 0
     _, rent_name_lbl, rent_slider, rent_val_lbl = ms(
@@ -152,7 +127,7 @@ def build_controls(parent, vars_dict, on_change, sections_list):
     ms(f, "Card Processing Fee %", 0, 5, 2.5, 0.1, r, "card_processing_fee_pct", "pct"); r += 1
     ms(f, "Other (£/month)", 0, 5000, 0, 50, r, "monthly_other", "gbp"); r += 1
 
-    # --- Pricing ---
+    # pricing
     sec, f, row = make_section("Pricing (£/hour | £/day)", row, expanded=False)
     r = 0
     for vtype, defaults in [

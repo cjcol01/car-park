@@ -1,16 +1,8 @@
-"""
-Reusable GUI widgets for the car park simulator.
-Contains CollapsibleSection and shared formatting/slider helpers.
-"""
-
 import tkinter as tk
 from tkinter import ttk
 
 
 class CollapsibleSection:
-    """A section with a clickable header that toggles visibility of its content.
-    Optionally shows a summary value on the right of the header (always visible)."""
-
     def __init__(self, parent, title, style="SubHeader.TLabel", expanded=True,
                  on_toggle=None, collapsible=True):
         self.parent = parent
@@ -18,7 +10,7 @@ class CollapsibleSection:
         self.on_toggle = on_toggle
         self.collapsible = collapsible
 
-        # Header frame (clickable) — spans full width
+        # header frame
         self.header_frame = ttk.Frame(parent)
         self.header_frame.columnconfigure(1, weight=1)
 
@@ -30,7 +22,7 @@ class CollapsibleSection:
             )
             self.arrow_label.grid(row=0, column=0, sticky="w", padx=(0, 5))
         else:
-            # Non-collapsible: use a spacer instead of arrow to keep alignment
+            # spacer to keep alignment when not collapsible
             spacer = ttk.Label(self.header_frame, text="  ")
             spacer.grid(row=0, column=0, sticky="w", padx=(0, 5))
 
@@ -40,17 +32,15 @@ class CollapsibleSection:
         )
         self.title_label.grid(row=0, column=1, sticky="w")
 
-        # Summary label — shown on right, always visible (updated externally)
+        # summary on right, always visible (updated externally)
         self.summary_label = ttk.Label(
             self.header_frame, text="", style="Result.TLabel",
             font=("Helvetica", 10, "bold"), width=16, anchor="e",
         )
         self.summary_label.grid(row=0, column=2, sticky="e", padx=(5, 0))
 
-        # Content frame
         self.content_frame = ttk.Frame(parent)
 
-        # Bind click to toggle only if collapsible
         if collapsible:
             for widget in (self.header_frame, self.arrow_label, self.title_label):
                 widget.bind("<Button-1>", self._toggle)
@@ -105,8 +95,7 @@ def format_val(val, fmt):
 def make_slider(parent, label, from_, to_, default, resolution=1,
                 row=0, var_key=None, fmt=None, val_width=10, vars_dict=None,
                 on_change_callback=None):
-    """Create a labeled slider that updates on change.
-    Returns (var, name_label, slider, val_label)."""
+    # returns (var, name_label, slider, val_label)
     name_lbl = ttk.Label(parent, text=label)
     name_lbl.grid(row=row, column=0, sticky="w", pady=2)
 
