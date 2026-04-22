@@ -2,6 +2,8 @@
 
 A desktop tool for modelling the financial viability of a car park. Built with Python and tkinter.
 
+Built on commision.
+
 ## What it does
 
 Simulates daily, weekly, monthly, and yearly revenue and costs based on configurable inputs — spaces, occupancy, vehicle mix, staffing, pricing, and more. Includes ANPR cost modelling, mortgage/purchase finance, indoor vs outdoor splits, commuter vs short-stay breakdowns, and a break-even occupancy calculator.
